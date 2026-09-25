@@ -52,6 +52,11 @@ const P = {
   refresh: '<path d="M20 11a8 8 0 0 0-14.8-4M4 13a8 8 0 0 0 14.8 4"/><path d="M4 3v4h4M20 21v-4h-4"/>',
   store: '<path d="M4 9.5 5.5 4h13L20 9.5M4 9.5h16v1a3 3 0 0 1-5.3 1.9A3 3 0 0 1 12 13.5a3 3 0 0 1-2.7-1.1A3 3 0 0 1 4 10.5Z"/><path d="M5.5 13v7.5h13V13"/>',
   leaf: '<path d="M5 19c0-8 5-14 15-15-1 10-7 15-15 15Z"/><path d="M5 19 13 11"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/>',
+  receipt: '<path d="M6 2.5h12v19l-2-1.4-2 1.4-2-1.4-2 1.4-2-1.4-2 1.4Z"/><path d="M9 7.5h6M9 11h6M9 14.5h4"/>',
+  chart: '<path d="M4 20.5h16"/><rect x="5.5" y="11" width="3" height="7" rx="1"/><rect x="10.5" y="6" width="3" height="12" rx="1"/><rect x="15.5" y="13" width="3" height="5" rx="1"/>',
+  lock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+  unlock: '<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 7.6-1.7"/>',
   cloud: '<path d="M7 18.5a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 8.5a4 4 0 0 1-.5 10Z"/>',
 };
 
@@ -62,16 +67,18 @@ export function ic(name, size = 22, extra = '') {
 
 /* ---------- Toasts ---------- */
 let toastWrap;
-export function toast(msg, undo, ms = 5000) {
+// action: optional { label, fn } shown as a second button (e.g. "Plan leftovers").
+export function toast(msg, undo, ms = 5000, action = null) {
   if (!toastWrap) { toastWrap = document.createElement('div'); toastWrap.className = 'toasts'; toastWrap.setAttribute('role', 'status'); toastWrap.setAttribute('aria-live', 'polite'); document.body.appendChild(toastWrap); }
   for (const old of [...toastWrap.children]) { old.classList.add('out'); setTimeout(() => old.remove(), 200); }
   const t = document.createElement('div');
   t.className = 'toast';
-  t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button type="button">Undo</button>' : ''}`;
+  t.innerHTML = `<span>${esc(msg)}</span>${action ? `<button type="button" data-t="act">${esc(action.label)}</button>` : ''}${undo ? '<button type="button" data-t="undo">Undo</button>' : ''}`;
   const kill = () => { t.classList.add('out'); setTimeout(() => t.remove(), 260); };
-  if (undo) t.querySelector('button').onclick = () => { kill(); undo(); };
+  if (undo) t.querySelector('[data-t="undo"]').onclick = () => { kill(); undo(); };
+  if (action) t.querySelector('[data-t="act"]').onclick = () => { kill(); action.fn(); };
   toastWrap.appendChild(t);
-  setTimeout(kill, undo ? Math.max(ms, 6000) : ms);
+  setTimeout(kill, undo || action ? Math.max(ms, action ? 9000 : 6000) : ms);
 }
 
 /* ---------- Sheets (bottom sheet on phones, dialog on desktop) ---------- */

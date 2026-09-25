@@ -3,7 +3,7 @@
 // Save:     fetch latest row -> merge by entity id -> conditional update (retry on race)
 // Pull:     fetch row -> merge into local -> push back if we still hold newer edits
 // Realtime: any change to our kitchen's row triggers a pull
-import { mergeDocs, needsPush, normalizeDoc, purgeTombstones, emptyDoc } from './core.js';
+import { mergeDocs, needsPush, normalizeDoc, migrateDoc, purgeTombstones, emptyDoc } from './core.js';
 
 /* ---------- Tiny IndexedDB key/value store (localStorage fallback) ---------- */
 const DB_NAME = 'meal-planner';
@@ -69,7 +69,7 @@ export class DocSync {
 
   async loadCache() {
     const c = await kvGet('doc:' + this.hid);
-    if (c && c.doc) { this.doc = normalizeDoc(c.doc); this.dirty = !!c.dirty; return true; }
+    if (c && c.doc) { this.doc = migrateDoc(c.doc); this.dirty = !!c.dirty; return true; }
     return false;
   }
 
