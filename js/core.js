@@ -19,9 +19,90 @@ export function normalizeDoc(doc) {
   d.v = 1;
   for (const c of COLLECTIONS) {
     const col = d[c];
-    if (Array.isArray(col)) d[c] = Object.fromEntries(col.filter(e => e && e.id).map(e => [e.id, e]));
+    if (Array.isArray(col)) d[c] = Object.fromEntries(col.filter(e => e && typeof e === 'object' && e.id).map(e => [e.id, e]));
     else if (!col || typeof col !== 'object') d[c] = {};
+    else if (Object.values(col).some(e => !e || typeof e !== 'object' || Array.isArray(e))) {
+      // A stray non-object value would crash every screen; drop it.
+      d[c] = Object.fromEntries(Object.entries(col).filter(([, e]) => e && typeof e === 'object' && !Array.isArray(e)));
+    }
   }
+  return d;
+}
+
+/* ------------------------------------------------------------------ *
+ * Reading saved data with safe defaults
+ *
+ * Saved entities are never rewritten just to migrate them: new fields are
+ * optional and every reader goes through these helpers, so documents written
+ * by older versions of the app (and by a phone that hasn't updated yet) keep
+ * working. Field names are never renamed.
+ * ------------------------------------------------------------------ */
+
+const num = (v, def = null) => { const n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) ? n : def; };
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+export const validDate = s => typeof s === 'string' && ISO_RE.test(s) && !isNaN(parseDate(s));
+
+export function readRecipe(r) {
+  const x = r && typeof r === 'object' ? r : {};
+  const servings = num(x.servings);
+  return {
+    ...x,
+    title: typeof x.title === 'string' && x.title.trim() ? x.title : 'Untitled recipe',
+    servings: servings > 0 ? servings : 1,
+    prepMin: Math.max(0, num(x.prepMin, 0)), cookMin: Math.max(0, num(x.cookMin, 0)),
+    tags: Array.isArray(x.tags) ? x.tags.filter(t => typeof t === 'string') : [],
+    ingredients: Array.isArray(x.ingredients) ? x.ingredients.filter(i => i && typeof i === 'object').map(i => ({ ...i, qty: num(i.qty), unit: typeof i.unit === 'string' ? i.unit : '', item: typeof i.item === 'string' ? i.item : String(i.item || i.name || '') })) : [],
+    steps: Array.isArray(x.steps) ? x.steps.filter(s => typeof s === 'string') : [],
+    rating: Math.max(0, Math.min(5, num(x.rating, 0))),
+    fav: !!x.fav,
+    sourceUrl: typeof x.sourceUrl === 'string' ? x.sourceUrl : '',
+    draft: !!x.draft,
+  };
+}
+
+export function readPantry(p) {
+  const x = p && typeof p === 'object' ? p : {};
+  return { ...x, name: typeof x.name === 'string' ? x.name : String(x.name || ''), low: !!x.low, expires: validDate(x.expires) ? x.expires : null };
+}
+
+export function readPrice(p) {
+  if (!p || typeof p !== 'object' || p.deleted) return null;
+  const price = num(p.price);
+  if (price == null || !(price >= 0)) return null;
+  const qty = num(p.qty, 1);
+  return { ...p, price, qty: qty > 0 ? qty : 1, unit: typeof p.unit === 'string' ? p.unit : '' };
+}
+
+// Shopping trips live in the history collection (type: 'trip') so phones that
+// haven't updated yet merge them like any other history entry.
+export const isTrip = h => !!h && h.type === 'trip';
+export function readTrip(h) {
+  if (!isTrip(h) || h.deleted) return null;
+  const total = num(h.total);
+  if (total == null || !(total >= 0) || !validDate(h.date)) return null;
+  return { ...h, total, store: typeof h.store === 'string' ? h.store : '', count: Math.max(0, num(h.count, 0)) };
+}
+
+export const SETTING_DEFAULTS = { householdSize: 2, budget: 0, units: 'us', hideNutrition: false, hideCost: false, weekStart: 0, defaultServings: 0 };
+export function readSetting(settings, id) {
+  const e = settings && settings[id];
+  const def = SETTING_DEFAULTS[id];
+  if (!e || e.deleted || e.value === undefined || e.value === null) return def;
+  const v = e.value;
+  switch (id) {
+    case 'householdSize': { const n = Math.round(num(v, def)); return n >= 1 && n <= 20 ? n : def; }
+    case 'budget': { const n = num(v, 0); return n > 0 ? n : 0; }
+    case 'units': return v === 'metric' ? 'metric' : 'us';
+    case 'hideNutrition': case 'hideCost': return v === true || v === 'true';
+    case 'weekStart': { const n = num(v, 0); return n >= 0 && n <= 6 ? n : 0; }
+    default: return v;
+  }
+}
+
+// One-pass check a loaded document goes through: collections as maps, no junk.
+export function migrateDoc(doc) {
+  const d = normalizeDoc(doc);
+  for (const c of COLLECTIONS) for (const [id, e] of Object.entries(d[c])) if (e.id == null) d[c][id] = { ...e, id };
   return d;
 }
 
@@ -203,6 +284,33 @@ export function convert(qty, from, to) {
 
 const round = (n, p = 3) => Math.round(n * 10 ** p) / 10 ** p;
 
+// Show an amount in US or metric units (display only; recipes keep what was typed).
+// Spoons stay spoons in both systems.
+export function toSystem(qty, unit, system = 'us') {
+  const u = normUnit(unit);
+  if (qty == null || !isFinite(qty)) return { qty, unit: u };
+  if (system === 'metric') {
+    if (u in WEIGHT && !METRIC.has(u)) {
+      const g = convert(qty, u, 'g');
+      return g >= 1000 ? { qty: round(g / 1000, 2), unit: 'kg' } : { qty: g >= 50 ? Math.round(g / 5) * 5 : Math.round(g), unit: 'g' };
+    }
+    if (['cup', 'fl oz', 'pint', 'quart', 'gallon'].includes(u)) {
+      const ml = convert(qty, u, 'ml');
+      return ml >= 1000 ? { qty: round(ml / 1000, 2), unit: 'l' } : { qty: ml >= 50 ? Math.round(ml / 5) * 5 : Math.round(ml), unit: 'ml' };
+    }
+    return { qty, unit: u };
+  }
+  if (u === 'g' || u === 'kg') {
+    const [bu, v] = bestUnit('weight', convert(qty, u, 'g'), false);
+    return { qty: round(v, 2), unit: bu };
+  }
+  if (u === 'ml' || u === 'l') {
+    const [bu, v] = bestUnit('volume', convert(qty, u, 'ml'), false);
+    return { qty: round(v, 2), unit: bu };
+  }
+  return { qty, unit: u };
+}
+
 // Best display unit for a base amount (ml or g) in the requested system.
 function bestUnit(dim, base, metric) {
   if (dim === 'volume') {
@@ -233,7 +341,7 @@ export function tidyQty(qty, unit) {
  * Item names + grocery combining
  * ------------------------------------------------------------------ */
 
-function singular(w) {
+export function singular(w) {
   if (w.length <= 3) return w;
   if (/(ss|us|is)$/.test(w)) return w;
   if (/ies$/.test(w)) return w.slice(0, -3) + 'y';

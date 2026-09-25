@@ -78,6 +78,19 @@
         signOut: async () => { listeners.forEach(cb => cb('SIGNED_OUT', null)); return { error: null }; },
       },
       from: (t) => new Query(t),
+      // Stand-in for the import-recipe Edge Function.
+      functions: {
+        invoke: async (name, { body } = {}) => {
+          await delay();
+          if (name !== 'import-recipe') return { data: null, error: { name: 'FunctionsHttpError', message: 'not found', context: { status: 404 } } };
+          const url = String(body && body.url || '');
+          const img = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+          if (/tiktok\.com/.test(url) && /spoken/.test(url)) return { data: { title: 'Viral feta pasta', ingredients: [], steps: [], image: '', imageData: img, author: 'Chef Sam @chefsam', sourceUrl: 'https://www.tiktok.com/@chefsam/video/2', site: 'TikTok', rawText: 'Viral feta pasta' }, error: null };
+          if (/tiktok\.com/.test(url)) return { data: { title: 'Garlic butter noodles', ingredients: [], steps: [], imageData: img, author: 'Chef Sam @chefsam', sourceUrl: 'https://www.tiktok.com/@chefsam/video/1', site: 'TikTok', rawText: 'Garlic butter noodles\nIngredients\n8 oz spaghetti\n4 cloves garlic\n3 tbsp butter\nInstructions\n1. Boil pasta 10 minutes.\n2. Toss with garlic butter.' }, error: null };
+          if (/broken/.test(url)) return { data: null, error: { name: 'FunctionsHttpError', message: 'Edge Function returned a non-2xx status code', context: { status: 502, json: async () => ({ error: 'That site answered with an error (500).' }) } } };
+          return { data: { title: 'Best Weeknight Chili', ingredients: ['1 lb ground beef', '1 onion, diced', '2 (15 oz) cans kidney beans', '1 tbsp chili powder'], steps: ['Brown the beef with the onion.', 'Add everything else and simmer 30 minutes.'], servings: 6, prepTime: 10, cookTime: 40, image: 'https://example.com/chili.jpg', imageData: img, author: 'Jane Cook', sourceUrl: url, site: 'Example Kitchen' }, error: null };
+        },
+      },
       rpc: async (name, args) => {
         await delay();
         const db = load();

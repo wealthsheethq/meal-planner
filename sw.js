@@ -1,8 +1,9 @@
 // Meal Planner service worker: offline app shell + cached fonts and supabase-js.
-const VERSION = 'mp-v1';
+const VERSION = 'mp-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/core.js', 'js/seed.js', 'js/sync.js', 'js/ui.js',
+  'js/pricing.js', 'js/prices.js', 'js/nutrition.js', 'js/plan.js', 'js/receipt.js', 'js/importer.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 const RUNTIME = 'mp-runtime-v1';
@@ -40,7 +41,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Fonts + supabase-js from CDNs: cache first, refresh in the background.
+  // Fonts, supabase-js and the receipt reader (Tesseract.js, fetched on first scan) from CDNs:
+  // cache first, refresh in the background.
   if (/fonts\.(googleapis|gstatic)\.com$/.test(url.hostname) || url.hostname === 'cdn.jsdelivr.net') {
     e.respondWith(caches.open(RUNTIME).then(async c => {
       const hit = await c.match(req);
