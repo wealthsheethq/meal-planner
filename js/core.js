@@ -4,7 +4,8 @@
  * Document + merge
  * ------------------------------------------------------------------ */
 
-export const COLLECTIONS = ['recipes', 'plan', 'grocery', 'pantry', 'prices', 'aisles', 'history', 'settings'];
+// countdowns + notes were added for the kitchen display; older phones keep them as unknown keys.
+export const COLLECTIONS = ['recipes', 'plan', 'grocery', 'pantry', 'prices', 'aisles', 'history', 'settings', 'countdowns', 'notes'];
 const META = new Set(['id', 'updatedAt', 'updatedBy', '_f']);
 const DAY = 86400000;
 
@@ -40,7 +41,8 @@ export function normalizeDoc(doc) {
 
 const num = (v, def = null) => { const n = typeof v === 'string' ? parseFloat(v) : v; return typeof n === 'number' && isFinite(n) ? n : def; };
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
-export const validDate = s => typeof s === 'string' && ISO_RE.test(s) && !isNaN(parseDate(s));
+// Round-trips so impossible dates like 2026-13-01 or 2026-02-30 are rejected.
+export const validDate = s => typeof s === 'string' && ISO_RE.test(s) && isoDate(parseDate(s)) === s;
 
 export function readRecipe(r) {
   const x = r && typeof r === 'object' ? r : {};
@@ -81,6 +83,22 @@ export function readTrip(h) {
   const total = num(h.total);
   if (total == null || !(total >= 0) || !validDate(h.date)) return null;
   return { ...h, total, store: typeof h.store === 'string' ? h.store : '', count: Math.max(0, num(h.count, 0)) };
+}
+
+// Countdowns (trips, birthdays, anniversaries): { title, date, emoji, yearly }.
+export function readCountdown(c) {
+  if (!c || typeof c !== 'object' || c.deleted || !validDate(c.date)) return null;
+  const title = typeof c.title === 'string' ? c.title.trim() : '';
+  if (!title) return null;
+  return { ...c, title, emoji: typeof c.emoji === 'string' && c.emoji ? c.emoji : '📅', yearly: c.yearly === true || c.yearly === 'true' };
+}
+
+// Message board notes: { text, by, expires (optional YYYY-MM-DD, shown through that day) }.
+export function readNote(n) {
+  if (!n || typeof n !== 'object' || n.deleted) return null;
+  const text = typeof n.text === 'string' ? n.text.trim() : '';
+  if (!text) return null;
+  return { ...n, text, by: typeof n.by === 'string' ? n.by : (n.updatedBy || null), expires: validDate(n.expires) ? n.expires : null };
 }
 
 export const SETTING_DEFAULTS = { householdSize: 2, budget: 0, units: 'us', hideNutrition: false, hideCost: false, weekStart: 0, defaultServings: 0 };

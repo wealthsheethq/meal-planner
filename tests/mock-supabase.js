@@ -32,6 +32,7 @@
     select() { if (this.op !== 'select') this.ret = true; return this; }
     eq(c, v) { this.f.push([c, v]); return this; }
     order() { return this; }
+    limit(n) { this.lim = n; return this; }
     maybeSingle() { this.one = true; return this; }
     update(p) { this.op = 'update'; this.p = p; return this; }
     insert(p) { this.op = 'insert'; this.p = p; return this; }
@@ -41,9 +42,18 @@
       const db = load();
       const rows = db[this.t] || [];
       const match = r => this.f.every(([c, v]) => r[c] === v);
+      // Money HQ table: RLS lets only one account read it. Denied unless the test grants it;
+      // any write is a bug (the display must only ever read it).
+      if (this.t === 'tracker_state') {
+        window.__mockStats.tracker = (window.__mockStats.tracker || 0) + 1;
+        if (this.op !== 'select') { window.__mockStats.trackerWrites = (window.__mockStats.trackerWrites || 0) + 1; return { data: null, error: { message: 'permission denied' } }; }
+        if (cfg.tracker === undefined) return { data: null, error: { code: '42501', message: 'permission denied for table tracker_state' } };
+        return { data: cfg.tracker ? [cfg.tracker] : [], error: null };
+      }
       if (this.op === 'select') {
         window.__mockStats.selects++;
-        const out = rows.filter(match).map(r => JSON.parse(JSON.stringify(r)));
+        let out = rows.filter(match).map(r => JSON.parse(JSON.stringify(r)));
+        if (this.lim != null) out = out.slice(0, this.lim);
         return { data: this.one ? (out[0] || null) : out, error: null };
       }
       if (this.op === 'update') {
@@ -75,6 +85,7 @@
         getSession: async () => ({ data: { session: user ? { user } : null }, error: null }),
         onAuthStateChange: (cb) => { listeners.push(cb); return { data: { subscription: { unsubscribe() {} } } }; },
         signInWithOtp: async ({ email }) => delay(email.includes('nobody') ? { error: { message: 'Signups not allowed for otp' } } : { error: null }),
+        startAutoRefresh: async () => {}, stopAutoRefresh: async () => {},
         signOut: async () => { listeners.forEach(cb => cb('SIGNED_OUT', null)); return { error: null }; },
       },
       from: (t) => new Query(t),

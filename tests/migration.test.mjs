@@ -31,7 +31,7 @@ test('old documents load: array collections become maps, junk is dropped, unknow
   const junk = normalizeDoc({ recipes: { a: 'oops', b: null, c: [1], d: { id: 'd', title: 'Real' } } });
   assert.deepEqual(Object.keys(junk.recipes), ['d']);
   assert.equal(migrateDoc({ recipes: { x: { title: 'no id' } } }).recipes.x.id, 'x');
-  assert.deepEqual(Object.keys(migrateDoc(null)).sort(), ['aisles', 'grocery', 'history', 'pantry', 'plan', 'prices', 'recipes', 'settings', 'v']);
+  assert.deepEqual(Object.keys(migrateDoc(null)).sort(), ['aisles', 'countdowns', 'grocery', 'history', 'notes', 'pantry', 'plan', 'prices', 'recipes', 'settings', 'v']);
   // No field was renamed or rewritten
   assert.deepEqual(d.recipes.r1, OLD.recipes.r1);
   assert.deepEqual(d.prices.milk, OLD.prices.milk);

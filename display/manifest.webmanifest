@@ -1,0 +1,20 @@
+{
+  "name": "Meal Planner Kitchen Display",
+  "short_name": "Kitchen",
+  "description": "Tonight's dinner, groceries, the week, weather and countdowns on your kitchen wall.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#FAF6EE",
+  "theme_color": "#2E4A2C",
+  "categories": ["food", "lifestyle", "productivity"],
+  "icons": [
+    { "src": "../icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "../icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "../icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
