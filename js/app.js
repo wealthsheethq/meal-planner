@@ -2,8 +2,9 @@ import {
   live, stamp, emptyDoc, itemKey, combineLines, scaleIngredients, parseIngredient, parseRecipeText, parseQty,
   formatAmount, formatQty, normUnit, unitDim, UNITS, budgetProgress, money,
   guessSection, DEFAULT_SECTIONS, isoDate, parseDate, addDays, weekStartOf, daysBetween, uid, findTimers,
-  readPantry, readTrip, isTrip, readSetting, toSystem, validDate,
+  readPantry, readTrip, isTrip, readSetting, toSystem, validDate, readCountdown, readNote,
 } from './core.js';
+import { readDisplaySettings, SCENES, DEFAULT_PLACE, upcomingCountdowns, nextOccurrence, activeNotes, geocodeUrl, parseGeocode } from './display-core.js';
 import { priceBook, priceFor, lineEstimate, recipeCostEst, planCostEst, groceryTotalEst, recipeNutrition, dayNutrition, specLabel } from './pricing.js';
 import { autoPlan, shuffleSlot, leftoverTargets, expiringSoon, useItUp, PLAN_SLOTS } from './plan.js';
 import { parseReceipt, matchReceiptLine, receiptPriceSpec } from './receipt.js';
@@ -11,10 +12,8 @@ import { findUrl, isMostlyUrl, safeUrl, hostOf, importToDraft, importErrorMessag
 import { SEED_RECIPES, SEED_PANTRY } from './seed.js';
 import { DocSync, kvGet, kvSet } from './sync.js';
 import { $, $$, esc, ic, toast, openSheet, confirmSheet, initDrag, compressImage, pushOverlay } from './ui.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, SITE_URL } from './config.js';
 
-const SUPABASE_URL = 'https://fnkdyhmogylbibgsbhgc.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZua2R5aG1vZ3lsYmliZ3NiaGdjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAyODQ2NjgsImV4cCI6MjEwNTg2MDY2OH0.yFa-0if7Xy5wAOYq_itlmi6P9wYQ6F3a3xQqMLTcXIM'; // public anon key; RLS protects the data
-const SITE_URL = 'https://wealthsheethq.github.io/meal-planner/';
 
 const SLOTS = [['breakfast', 'Breakfast'], ['lunch', 'Lunch'], ['dinner', 'Dinner'], ['snack', 'Snack']];
 const QUICK_NOTES = [['Leftovers', '🍲'], ['Eat out', '🍽️'], ['Takeout', '🥡'], ['Fend for yourselves', '🥪'], ['Freezer meal', '🧊'], ['Date night', '🕯️']];
@@ -1555,6 +1554,11 @@ function viewMore() {
           ${li('autoplan', 'sparkle', 'gold', 'Auto-plan a week', 'Fill empty meals within a budget')}
           ${li('open-sections', 'store', '', 'Store section order', 'Match your Harris Teeter aisles')}
         </div>
+        <div class="list">
+          ${li('open-display', 'home', 'plum', 'Kitchen display', 'Always-on screen for a tablet or TV · settings')}
+          ${li('open-countdowns', 'sparkle', 'gold', 'Countdowns', countdownSub())}
+          ${li('open-notes', 'edit', 'terra', 'Notes for the kitchen', notesSub())}
+        </div>
       </div>
       <div class="stack">
         <div class="card card-pad">
@@ -1583,6 +1587,168 @@ function viewMore() {
       </div>
     </div>`;
   return [top, body];
+}
+
+/* ================================================================== *
+ * KITCHEN DISPLAY: link, settings, countdowns, notes
+ * ================================================================== */
+const displayUrl = () => new URL('display/', location.href.split('#')[0].split('?')[0].replace(/[^/]*$/, '')).href;
+function countdownSub() {
+  const up = upcomingCountdowns(live(S.doc.countdowns), today(), 1)[0];
+  return up ? `${esc(up.emoji)} ${esc(up.title)} · ${esc(up.when.toLowerCase())}` : 'Trips, birthdays and anniversaries';
+}
+function notesSub() {
+  const n = activeNotes(live(S.doc.notes), today());
+  return n.length ? `${plural(n.length, 'note')} on the board` : 'Leave a message on the kitchen display';
+}
+
+function openDisplaySheet() {
+  const st = { results: null, searching: false, err: '' };
+  const put = (k, v) => mutate(api => setSetting(api, 'display.' + k, v));
+  const seg = (k, cur, opts) => `<div class="seg">${opts.map(([v, l]) => `<button class="${String(cur) === String(v) ? 'on' : ''}" data-act="dp-set" data-k="${k}" data-v="${esc(String(v))}">${esc(l)}</button>`).join('')}</div>`;
+  const sw = (k, on, label) => `<div class="pref-row"><span class="grow">${label}</span><button class="switch ${on ? 'on' : ''}" role="switch" aria-checked="${on}" aria-label="${esc(label)}" data-act="dp-toggle" data-k="${k}"></button></div>`;
+  const setPlace = p => { put('place', p); st.results = null; toast(`Display weather: ${p.name}`); s.refreshBody(); };
+  const s = openSheet({
+    title: 'Kitchen display', live: true,
+    body: () => {
+      const c = readDisplaySettings(S.doc.settings);
+      return `<div class="stack">
+        <div class="hero-card"><h2>Your kitchen, on the wall</h2><p>Open this link on an old tablet or a TV browser and sign in with your email. It shows tonight's dinner, the grocery list, the week, weather, countdowns and notes, and stays on.</p>
+          <div class="row wrap"><a class="btn btn-sm" style="text-decoration:none" href="${esc(displayUrl())}" target="_blank" rel="noopener">${ic('home', 17)} Open kitchen display</a><button class="btn btn-sm" data-act="dp-copy">${ic('copy', 17)} Copy link</button></div></div>
+        <p class="tiny muted" style="margin:0">These settings are shared with your kitchen — the display's gear icon changes the same ones.</p>
+        <div class="card card-pad stack">
+          <h3>Weather location</h3>
+          <div class="small muted">Now: <b>${esc(c.place.name)}</b></div>
+          <form data-submit="dp-geo" class="add-bar" style="margin:0"><input class="input" name="q" placeholder="Search a city" autocomplete="off" aria-label="City"><button class="btn btn-soft" type="submit" aria-label="Search">${ic('search', 18)}</button></form>
+          ${st.searching ? '<div class="small muted">Searching…</div>' : ''}${st.err ? `<div class="small muted">${esc(st.err)}</div>` : ''}
+          ${st.results ? `<div class="chips wrap">${st.results.map((p, i) => `<button class="chip" data-act="dp-place" data-i="${i}">${esc(p.name)}</button>`).join('') || '<span class="small muted">No places found</span>'}</div>` : ''}
+          ${c.place.name !== DEFAULT_PLACE.name ? `<button class="btn btn-ghost btn-sm" data-act="dp-reset">Reset to ${esc(DEFAULT_PLACE.name)}</button>` : ''}
+        </div>
+        <div class="card card-pad stack">
+          <h3>Screens</h3>
+          <div class="chips wrap">${SCENES.map(([id, l]) => `<button class="chip ${c.scenes.includes(id) ? 'on' : ''}" data-act="dp-scene" data-v="${id}" aria-pressed="${c.scenes.includes(id)}">${esc(l)}</button>`).join('')}</div>
+          <div class="field"><span>Change screens every</span>${seg('rotateSec', c.rotateSec, [[0, 'Off'], [10, '10s'], [20, '20s'], [30, '30s'], [60, '60s']])}</div>
+        </div>
+        <div class="card card-pad stack">
+          <h3>Night mode</h3>
+          ${sw('nightOn', c.nightOn, 'Dim the screen at night')}
+          <div class="grid-2"><label class="field"><span>From</span><input class="input" type="time" data-change="dp-time" data-k="nightStart" value="${c.nightStart}"></label><label class="field"><span>Until</span><input class="input" type="time" data-change="dp-time" data-k="nightEnd" value="${c.nightEnd}"></label></div>
+        </div>
+        <div class="card card-pad stack">
+          <h3>Units & clock</h3>
+          <div class="grid-2"><div class="field"><span>Temperature</span>${seg('temp', c.temp, [['f', '°F'], ['c', '°C']])}</div><div class="field"><span>Clock</span>${seg('clock24', String(c.clock24), [['false', '12h'], ['true', '24h']])}</div></div>
+        </div>
+        <div class="card card-pad stack">
+          <h3>Money HQ panel</h3>
+          ${sw('money', c.money, 'Show Money HQ on the display')}
+          ${c.money ? sw('moneyPrivacy', c.moneyPrivacy, 'Privacy mode (no dollar amounts)') : ''}
+          <p class="tiny muted" style="margin:0">Read-only debt-free progress. It only appears when the account signed in on the display can see it.</p>
+        </div>
+      </div>`;
+    },
+    actions: {
+      'dp-copy': async () => { try { await navigator.clipboard.writeText(displayUrl()); toast('Link copied'); } catch { shareText(displayUrl(), 'Kitchen display'); } },
+      'dp-set': el => { const k = el.dataset.k, v = el.dataset.v; put(k, k === 'rotateSec' ? +v : k === 'clock24' ? v === 'true' : v); },
+      'dp-toggle': el => { const k = el.dataset.k; put(k, !readDisplaySettings(S.doc.settings)[k]); },
+      'dp-scene': el => {
+        const c = readDisplaySettings(S.doc.settings); const id = el.dataset.v;
+        const next = c.scenes.includes(id) ? c.scenes.filter(x => x !== id) : [...c.scenes, id];
+        if (!next.length) { toast('Keep at least one screen'); return; }
+        put('scenes', SCENES.map(x => x[0]).filter(x => next.includes(x)));
+      },
+      'dp-time': el => { if (/^\d{2}:\d{2}$/.test(el.value)) put(el.dataset.k, el.value); },
+      'dp-geo': async form => {
+        const q = form.q.value.trim(); if (!q) return;
+        st.searching = true; st.err = ''; s.refreshBody();
+        try { const res = await fetch(geocodeUrl(q)); st.results = parseGeocode(await res.json()); } catch { st.results = null; st.err = "Couldn't search right now — check your connection."; }
+        st.searching = false; s.refreshBody();
+      },
+      'dp-place': el => setPlace(st.results[+el.dataset.i]),
+      'dp-reset': () => setPlace(DEFAULT_PLACE),
+    },
+  });
+}
+
+const CD_EMOJI = ['🎉', '🎂', '💍', '❤️', '✈️', '🏖️', '🏔️', '🏠', '🎓', '👶', '🐶', '🎄', '🎃', '🎁', '⚽', '📅'];
+function openCountdowns() {
+  const st = { id: null, title: '', date: '', emoji: '🎉', yearly: false };
+  const keep = () => { const f = s.el && $('form[data-submit="cd-save"]', s.el); if (f) { st.title = f.title.value; st.date = f.date.value; } };
+  const reset = () => Object.assign(st, { id: null, title: '', date: '', emoji: '🎉', yearly: false });
+  const s = openSheet({
+    title: 'Countdowns', live: true,
+    body: () => {
+      const t = today();
+      const all = live(S.doc.countdowns).map(readCountdown).filter(Boolean);
+      const up = upcomingCountdowns(all, t, 200);
+      const past = all.filter(c => !nextOccurrence(c, t)).sort((a, b) => b.date.localeCompare(a.date));
+      const row = (c, sub) => `<div class="list-item"><span class="li-icon gold" style="font-size:20px">${esc(c.emoji)}</span>
+        <div class="grow"><div class="li-title ellipsis">${esc(c.title)}</div><div class="li-sub">${sub}</div></div>
+        <button class="icon-btn sm" data-act="cd-edit" data-id="${esc(c.id)}" aria-label="Edit ${esc(c.title)}">${ic('edit', 18)}</button>
+        <button class="icon-btn sm" data-act="cd-del" data-id="${esc(c.id)}" aria-label="Delete ${esc(c.title)}">${ic('trash', 18)}</button></div>`;
+      return `<p class="muted small" style="margin:0 0 12px">Trips, birthdays, anniversaries and events. They count down on the kitchen display.</p>
+        <form data-submit="cd-save" class="card card-pad stack" style="margin-bottom:16px">
+          <label class="field"><span>${st.id ? 'Edit countdown' : 'New countdown'}</span><input class="input" name="title" maxlength="60" required value="${esc(st.title)}" placeholder="Beach trip, Sam's birthday…"></label>
+          <label class="field"><span>Date</span><input class="input" type="date" name="date" required value="${esc(st.date)}"></label>
+          <div class="pref-row"><span class="grow">Repeats every year <span class="tiny muted">(birthdays, anniversaries)</span></span><button type="button" class="switch ${st.yearly ? 'on' : ''}" role="switch" aria-checked="${st.yearly}" aria-label="Repeats every year" data-act="cd-yearly"></button></div>
+          <div class="chips wrap">${CD_EMOJI.map(x => `<button type="button" class="chip ${x === st.emoji ? 'on' : ''}" data-act="cd-emoji" data-v="${x}" aria-label="Emoji ${x}">${x}</button>`).join('')}</div>
+          <div class="row"><button class="btn btn-primary grow" type="submit">${st.id ? 'Save changes' : `${ic('plus', 18)} Add countdown`}</button>${st.id ? '<button type="button" class="btn btn-ghost" data-act="cd-cancel">Cancel</button>' : ''}</div>
+        </form>
+        ${up.length ? `<div class="list">${up.map(c => row(c, `${esc(fmtDate(c.next))}${c.yearly ? ' · every year' : ''}${c.milestone ? ` · ${esc(c.milestone)}` : ''} · <b>${esc(c.when)}</b>`)).join('')}</div>`
+        : `<div class="empty" style="padding:8px 0"><div class="empty-art">⏳</div><h3>Nothing to count down to yet</h3><p>Add a trip or a birthday above.</p></div>`}
+        ${past.length ? `<h3 style="margin:18px 0 8px">Past</h3><div class="list">${past.map(c => row(c, esc(fmtDate(c.date)) + ' · done')).join('')}</div>` : ''}`;
+    },
+    actions: {
+      'cd-yearly': () => { keep(); st.yearly = !st.yearly; s.refreshBody(); },
+      'cd-emoji': el => { keep(); st.emoji = el.dataset.v; s.refreshBody(); },
+      'cd-cancel': () => { reset(); s.refreshBody(); },
+      'cd-edit': el => { const c = readCountdown(S.doc.countdowns[el.dataset.id]); if (!c) return; Object.assign(st, { id: c.id, title: c.title, date: c.date, emoji: c.emoji, yearly: c.yearly }); s.refreshBody(); },
+      'cd-del': el => { const c = S.doc.countdowns[el.dataset.id]; if (!c) return; mutate(api => api.del('countdowns', c.id), { toast: `Removed ${c.title}` }); },
+      'cd-save': form => {
+        const title = form.title.value.trim(), date = form.date.value;
+        if (!title || !validDate(date)) { toast('Add a name and a date'); return; }
+        const id = st.id || uid('cd_');
+        const edit = !!st.id;
+        mutate(api => api.put('countdowns', id, { title, date, emoji: st.emoji, yearly: st.yearly, ...(edit ? {} : { createdAt: Date.now() }) }), { toast: edit ? 'Countdown updated' : `Counting down to ${title}` });
+        reset(); s.refreshBody();
+      },
+    },
+  });
+}
+
+function openNotes() {
+  const st = { exp: 3, custom: '' };
+  const expDate = () => st.exp === 'custom' ? (validDate(st.custom) ? st.custom : null) : st.exp == null ? null : addDays(today(), st.exp);
+  const keep = () => { const f = s.el && $('form[data-submit="nt-save"]', s.el); if (f) { st.text = f.text.value; if (f.exp) st.custom = f.exp.value; } };
+  const s = openSheet({
+    title: 'Notes for the kitchen', live: true,
+    body: () => {
+      const t = today();
+      const notes = activeNotes(live(S.doc.notes), t);
+      const opts = [[0, 'Today'], [1, 'Tomorrow'], [3, '3 days'], [7, '1 week'], [null, 'No expiry'], ['custom', 'Pick a date']];
+      return `<p class="muted small" style="margin:0 0 12px">Short notes either of you can post. They show on the kitchen display until they expire.</p>
+        <form data-submit="nt-save" class="card card-pad stack" style="margin-bottom:16px">
+          <label class="field"><span>Note</span><textarea class="textarea" name="text" rows="2" maxlength="140" required placeholder="Pizza night Friday! · Dentist at 3pm · Love you ❤️" style="min-height:70px">${esc(st.text || '')}</textarea></label>
+          <div class="field"><span>Show until</span><div class="chips wrap">${opts.map(([v, l]) => `<button type="button" class="chip ${st.exp === v ? 'on' : ''}" data-act="nt-exp" data-v="${v === null ? 'none' : v}">${l}</button>`).join('')}</div></div>
+          ${st.exp === 'custom' ? `<input class="input" type="date" name="exp" min="${t}" value="${esc(st.custom)}" aria-label="Expiry date">` : ''}
+          <button class="btn btn-primary" type="submit">${ic('plus', 18)} Post note</button>
+        </form>
+        ${notes.length ? `<div class="list">${notes.map(n => `<div class="list-item"><span class="li-icon terra">${ic('edit', 18)}</span>
+          <div class="grow"><div class="li-title" style="white-space:normal;overflow-wrap:anywhere">${esc(n.text)}</div><div class="li-sub">${esc(memberName(n.by) || 'Someone')}${n.expires ? ` · until ${n.expires === t ? 'tonight' : esc(fmtDate(n.expires))}` : ' · no expiry'}</div></div>
+          <button class="icon-btn sm" data-act="nt-del" data-id="${esc(n.id)}" aria-label="Delete note">${ic('trash', 18)}</button></div>`).join('')}</div>`
+        : `<div class="empty" style="padding:8px 0"><div class="empty-art">📝</div><h3>The board is empty</h3><p>Post a note and it appears on the kitchen display.</p></div>`}`;
+    },
+    actions: {
+      'nt-exp': el => { keep(); const v = el.dataset.v; st.exp = v === 'none' ? null : v === 'custom' ? 'custom' : +v; s.refreshBody(); },
+      'nt-del': el => { const n = S.doc.notes[el.dataset.id]; if (!n) return; mutate(api => api.del('notes', n.id), { toast: 'Note removed' }); },
+      'nt-save': form => {
+        const text = form.text.value.trim(); if (!text) return;
+        if (form.exp) st.custom = form.exp.value;
+        if (st.exp === 'custom' && !validDate(st.custom)) { toast('Pick a date for the note to expire'); return; }
+        mutate(api => api.put('notes', uid('nt_'), { text: text.slice(0, 140), by: S.user.id, expires: expDate(), createdAt: Date.now() }), { toast: 'Posted to the kitchen display' });
+        st.text = ''; s.refreshBody();
+      },
+    },
+  });
 }
 
 function openKitchenSheet() {
@@ -2349,6 +2515,9 @@ const ACT = {
   'open-sections': (el, e) => { e && e.preventDefault(); openSections(); },
   'open-history': () => openHistory(),
   'open-search': () => openSearch(),
+  'open-display': () => openDisplaySheet(),
+  'open-countdowns': () => openCountdowns(),
+  'open-notes': () => openNotes(),
   theme: el => { try { localStorage.setItem('mp:theme', el.dataset.v); } catch { /* ignore */ } applyTheme(); render(); },
   'sync-now': () => { if (S.sync) { S.sync.pull(); toast('Syncing…'); } },
   'sign-out': async () => {

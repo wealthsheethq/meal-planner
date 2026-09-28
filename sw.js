@@ -1,9 +1,10 @@
 // Meal Planner service worker: offline app shell + cached fonts and supabase-js.
-const VERSION = 'mp-v2';
+const VERSION = 'mp-v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/core.js', 'js/seed.js', 'js/sync.js', 'js/ui.js',
-  'js/pricing.js', 'js/prices.js', 'js/nutrition.js', 'js/plan.js', 'js/receipt.js', 'js/importer.js',
+  'js/pricing.js', 'js/prices.js', 'js/nutrition.js', 'js/plan.js', 'js/receipt.js', 'js/importer.js', 'js/config.js',
+  'display/index.html', 'display/display.css', 'display/manifest.webmanifest', 'js/display.js', 'js/display-core.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
 const RUNTIME = 'mp-runtime-v1';
@@ -35,9 +36,11 @@ self.addEventListener('fetch', (e) => {
   if (url.hostname.endsWith('supabase.co')) return;
 
   // Pages: network first so updates land quickly, cached shell when offline.
+  // The kitchen display (display/) has its own page.
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).then(res => { const copy = res.clone(); caches.open(VERSION).then(c => c.put('index.html', copy)); return res; })
-      .catch(() => caches.match('index.html', { ignoreSearch: true })));
+    const page = /\/display(\/|\/index\.html)?$/.test(url.pathname) ? 'display/index.html' : 'index.html';
+    e.respondWith(fetch(req).then(res => { if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(page, copy)); } return res; })
+      .catch(() => caches.match(page, { ignoreSearch: true })));
     return;
   }
 
